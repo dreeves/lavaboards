@@ -2,7 +2,7 @@
 
 // Constants and globals -------------------------------------------------------
 const ISQRT2 = 1/Math.SQRT2; // 1/2 width of a square inscribed in a unit circle
-const maxxy = {x: 2023, y: 2023}; // upper right corner of what's viewable
+const maxxy = {x: 10, y: 10}; // upper right corner of what's viewable
 let frontier = [{x: 0,      y: ISQRT2},    // initial frontier of the lavaboards
                 {x: ISQRT2, y: 0}];        // ie, 1 diagonal board in the corner
 const svg = d3.select("#lava").append("svg");
@@ -79,12 +79,9 @@ function intersegtion(c, p, q) {
   // technology, whether the p-q segment can possibly intersect the circle. Note
   // the cleverness adding the region numbers, etc, which is just a slick way to
   // say that there's no intersection if both points are in region 0 or both are
-  // in region 1. This line is purely for efficiency; omitting it would be fine.
-  //if (abs(circumregion(c, p) + circumregion(c, q) - 1) == 1) return [];
-  // PS: Oops, that's wrong. If both points are outside the circle, the line
-  // joining them can still intersect the circle! Really it's only if both
-  // points are inside the circle that we know it can't intersect. Maybe that's
-  // not too useful...
+  // in region 1.
+  if (abs(circumregion(c, p) + circumregion(c, q) - 1) == 1) return [];
+  // Uncommenting the above should change nothing except speeding things up.....
   
   let tlist = [];
   if (p.x == q.x) {                               // CASE OF A VERTICAL SEGMENT:
@@ -159,69 +156,42 @@ function waypoint(path, t) {
   ASSERT(false, "waypoint: target point not along any segment");
 }
 
-// Given 3 points, return the angle between them in radians
-function mouthangle(x1,y1, x2,y2, x3,y3) {          // Call the points A, B, & C
-  const a = dist({x: x1, y: y1}, {x: x2, y: y2});   // a = distance from A to B
-  const b = dist({x: x2, y: y2}, {x: x3, y: y3});   // b = distance from B to C
-  const c = dist({x: x1, y: y1}, {x: x3, y: y3});   // c = distance from A to C 
-  return Math.acos((a*a+b*b-c*c)/(2*a*b));          // law of cosines
-}
-
 // Pick a random point on the frontier, returning an {i, p} object where i is
 // the segment number in the frontier and p is the {x, y} point. Bias towards
 // the middle.
-function pickWaypoint() {
-  return waypoint(frontier, trisamp(0, 1));
-  if (frontier.length < 4) return waypoint(frontier, .5);
-  let sa = Math.PI; // smallest angle so far
-  let oi = -1;    // optimal index: index of the segment with the smallest angle
-  CLOG(`starting with best angle = ${sa*360/(2*Math.PI)}°`);
-  for (let i=2; i<frontier.length; i++) {
-    const a = mouthangle(frontier[i-2].x, frontier[i-2].y,
-                         frontier[i-1].x, frontier[i-1].y,
-                         frontier[i  ].x, frontier[i  ].y);
-    if (a < sa) { sa = a; oi = i-1; }
-    CLOG(`${i}. best angle = ${sa*360/(2*Math.PI)}° (oi = ${oi})`);
-  }
-  drawDot(frontier[oi]);
-  const pl1 = max(.5, pathlength(frontier.filter((_, i) => i <= oi)));
-  const pltot = pathlength(frontier);
-  return waypoint(frontier, (pl1+randelem([-.5,.5]))/pltot);
-  //oi = max(1, oi);
-  //return { i: oi, p: waypoint([frontier[oi-1], frontier[oi]], .5).p };
-}
+function randomWaypoint() { return waypoint(frontier, trisamp(0, 1)) }
 
 // Pick a random point c on the frontier, find the points on the frontier that 
 // are a distance 1 from it (by treating c as the center of a circle and finding
 // the intersections), pick one of the intersections, call it p, and return the
 // new frontier with segment c-p added.
 function addseg() {
-  let {i: i, p: c} = pickWaypoint(); // note segment number the waypoint is on
+  let {i: i, p: c} = randomWaypoint(); // note segment number the waypoint is on
   //drawDot(c);
   //drawCircle(c, 1);
-  // We'll walk through the segments in the frontier collecting the 
-  // intersections of each with our circle centered at c. But we need to allow
-  // for intersections on the x- or y-axis, outside the current frontier, so we
-  // first augment the frontier with a vertical segment at the start and a 
-  // horizontal segment at the end.
+  // Walk through the segments in the frontier, call each one p-q, and collect
+  // the intersections of p-q with the circle centered at c.
+  // But we need to allow for that intersection being on the x- or y-axis,
+  // outside the current frontier, so we first augment the frontier with a 
+  // vertical segment at the start and a horizontal segment at the end.
   const ini = frontier[0];                               // expected to have x=0
   const fin = frontier[frontier.length-1];               // expected to have y=0
   ASSERT(ini.x===0 && fin.y===0, "frontier starts on y-axis, ends on x-axis");
-  const path = [ {x: 0,         y: ini.y + 1}, ...frontier,     // the augmented
-                 {x: fin.x + 1, y: 0        }               ];  // frontier...
+  const path = [ {x: 0,         y: ini.y + 1}, ...frontier,
+                 {x: fin.x + 1, y: 0        }               ];
   const intersex = [];  // list of all intersections of the path with the circle
   for (let j=1; j<path.length; j++) {
     intersex.push(...intersegtion(c, path[j-1],path[j]).map(p => ({i: j-1, p})))
   }
   //intersex.forEach(ip => drawDot(ip.p));
   let {i: j, p: p} = randelem(intersex);
+  drawPath([c,p]);
   // At this point say that i < j, that is, we picked our intersection to be
   // after point c in the frontier. In that case we want to filter the frontier
-  // to jump from segment i to j. If not, just flip i and j first.
+  // to jump from segment i to j.
   if (i > j) { [i, j] = [j, i]; [c, p] = [p, c] }          // put these in order
-  frontier = [...frontier.filter((_, k) => k <  i), c, p,  // voila, the updated
-              ...frontier.filter((_, k) => k >= j)];       // frontier!
-  drawPath([c, p]);
+  frontier = [...frontier.filter((_, k) => k <  i), c, p,
+              ...frontier.filter((_, k) => k >= j)];
 }
 
 // Draw a line connecting each {x,y} pair in the array, in order received
@@ -237,7 +207,7 @@ function drawPath(path) {
 function drawDot(p) {
   svg.append("circle").attr("cx", xScale(p.x))
                       .attr("cy", yScale(p.y))
-                      .attr("r", 3) // radius in pixels
+                      .attr("r", 1) // radius in pixels
                       .style("fill", "white")
 }
 
@@ -263,11 +233,9 @@ function regen() {
   // Scale the coordinates so origin is at bottom left but keep 1:1 aspect ratio
   sv = min(width, height); // sv for square-view
   maxmax = max(maxxy.x, maxxy.y);
-  // oops this isn't quite right unless maxxy.x and maxxy.y are the same
   xScale = d3.scaleLinear().domain([0, maxmax*width/sv ]).range([0,  width]);
   yScale = d3.scaleLinear().domain([0, maxmax*height/sv]).range([height, 0]);
 
-  drawDot(maxxy);
   drawPath(frontier);    
 }
 
@@ -278,14 +246,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", (event) => {
     if (event.code === "Space") {
       addseg();
-      //drawPath(frontier);
+      drawPath(frontier);
     }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key >= '0' && event.key <= '9') {
       const n = 10**parseInt(event.key);
       for (let i = 0; i < n; i++) addseg();
-      //drawPath(frontier);
+      drawPath(frontier);
     }
   });
   
